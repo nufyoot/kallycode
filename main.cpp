@@ -9,6 +9,9 @@ using namespace std;
 
 typedef basic_string<char16_t>          String;
 
+template<class T> struct delete_pointer     { static inline void on(T  value) {               } };
+template<class T> struct delete_pointer<T*> { static inline void on(T* value) { delete value; } };
+
 /***************************************************************************\
 * Represents a single token used for parsing a file.
 \***************************************************************************/
@@ -116,7 +119,7 @@ struct StackEntry
 
     virtual ~StackEntry()
     {
-        if (std::is_pointer<T>::value) { delete (void*)value; }
+        delete_pointer<T>::on(value);
     }
 };
 
@@ -181,10 +184,7 @@ struct LinkedListEntry
 
     virtual ~LinkedListEntry()
     {
-        if (std::is_pointer<T>::value) 
-        { 
-            delete value; 
-        }
+        delete_pointer<T>::on(value);
     }
 };
 
