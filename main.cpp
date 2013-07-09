@@ -1,13 +1,11 @@
 #include <stdio.h>
 #include <fstream>
 #include <cstring>
-#include <type_traits>
 
 using namespace std;
 
-#define TO_CHAR16(a) reinterpret_cast<char16_t*>(a)
-
-typedef basic_string<char16_t>          String;
+typedef wchar_t Char;
+typedef wstring String;
 
 template<class T> struct delete_pointer     { static inline void on(T  value) {               } };
 template<class T> struct delete_pointer<T*> { static inline void on(T* value) { delete value; } };
@@ -41,14 +39,7 @@ struct TypeToken : Token
     TypeToken(String* typeName, unsigned long sizeInMemory = 0)
         : Token()
     {
-        name = new String(typeName->c_str());
-        typeSizeInMemory = sizeInMemory;
-    }
-
-    TypeToken(char16_t* typeName, unsigned long sizeInMemory = 0)
-        : Token()
-    {
-        name = new String(typeName);
+        name = typeName;
         typeSizeInMemory = sizeInMemory;
     }
 
@@ -68,13 +59,7 @@ struct IdentifierToken : Token
     IdentifierToken(String* name)
         : Token()
     {
-        this->name = new String(name->c_str());
-    }
-
-    IdentifierToken(char16_t* name)
-        : Token()
-    {
-        this->name = new String(name);
+        this->name = name;
     }
 
     virtual ~IdentifierToken()
@@ -91,12 +76,6 @@ struct VariableToken : IdentifierToken
     TypeToken*      type;
 
     VariableToken(TypeToken* variableType, String* typeName)
-        : IdentifierToken(typeName)
-    {
-        type = variableType;
-    }
-
-    VariableToken(TypeToken* variableType, char16_t* typeName)
         : IdentifierToken(typeName)
     {
         type = variableType;
@@ -259,7 +238,7 @@ struct Scope
     void init()
     {
         // This is just to get a basic scope with the core data.
-        addType(new TypeToken(TO_CHAR16(L"int"), 4UL));
+        addType(new TypeToken(new String(L"int"), 4UL));
     }
 };
 
@@ -290,11 +269,11 @@ struct Program
 \***************************************************************************/
 struct Tokenizer
 {
-    const char16_t*         contents;
+    const Char*         contents;
     unsigned int            position;
     Stack<unsigned int>*    markerStack;
 
-    Tokenizer(const char16_t* input)
+    Tokenizer(const Char* input)
     {
         contents = input;
         position = 0;
@@ -328,7 +307,7 @@ struct Tokenizer
         return contents[++position] != '\0';
     }
 
-    inline char16_t current()
+    inline Char current()
     {
         return contents[position];
     }
@@ -337,7 +316,7 @@ struct Tokenizer
 /***************************************************************************\
 * Empty function signatures
 \***************************************************************************/
-bool        parse               (const char16_t* fileName, Program** program);
+bool        parse               (const Char* fileName, Program** program);
 bool        parseIdentifier     (Tokenizer* tokenizer, Scope* scope, String** identifier);
 bool        parseNextStatement  (Tokenizer* tokenizer, Scope* scope, Token** statement);
 void        skipWhitespace      (Tokenizer* tokenizer);
@@ -352,12 +331,8 @@ void        skipWhitespace      (Tokenizer* tokenizer);
 int main(int argc, const char** argv) 
 {
     Program* program;
-    char16_t* input;
 
-    input = TO_CHAR16(
-        L"int i;"
-        L"i = 5;"
-    );
+    auto input = L"int i; i = 5;";
 
     for (long i = 0; i < 10000000; i++) 
     {
@@ -376,7 +351,7 @@ int main(int argc, const char** argv)
 * Arguments:
 *   c - The character to check
 \***************************************************************************/
-bool isAlpha(char16_t c)
+bool isAlpha(Char c)
 {
     return (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z');
 }
@@ -388,7 +363,7 @@ bool isAlpha(char16_t c)
 * Arguments:
 *   fileName - The file name of the file to parse.
 \***************************************************************************/
-bool parse(const char16_t* contents, Program** program) 
+bool parse(const Char* contents, Program** program) 
 {
     Program* result = new Program();
     Tokenizer tokenizer(contents);
@@ -428,7 +403,7 @@ bool parseNextStatement(Tokenizer* tokenizer, Scope* scope, Token** statement)
     }
     unsigned int finish = tokenizer->position;
     unsigned int length = finish - start;
-    String rawToken(tokenizer->contents + (start * sizeof(char16_t)), length);
+    String rawToken(tokenizer->contents + (start * sizeof(Char)), length);
     
     TypeToken* type;
     bool result = false;
@@ -447,8 +422,6 @@ bool parseNextStatement(Tokenizer* tokenizer, Scope* scope, Token** statement)
                 *statement = new VariableToken(type, identifier);
                 result = true;
             }
-
-            delete identifier;
         }
     }
 
@@ -473,7 +446,7 @@ bool parseIdentifier(Tokenizer* tokenizer, Scope* scope, String** identifier)
     unsigned int finish = tokenizer->position;
     unsigned int length = finish - start;
 
-    *identifier = new String(tokenizer->contents + (start * sizeof(char16_t)), length);
+    *identifier = new String(tokenizer->contents + (start * sizeof(Char)), length);
     return true;
 }
 
