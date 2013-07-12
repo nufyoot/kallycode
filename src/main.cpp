@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <string>
 #include <ctime>
+#include <fstream>
+#include <sstream>
 
 // Used for finding memory leaks on windows.
 #ifdef _DEBUG
@@ -13,8 +15,11 @@
 
 using namespace std;
 
-typedef wchar_t     Char;
-typedef wstring     String;
+const int STACK_SIZE = 512;
+
+typedef wchar_t         Char;
+typedef wstring         String;
+typedef unsigned char   Byte;
 
 template<class T> struct delete_pointer     { static inline void on(T  value) {               } };
 template<class T> struct delete_pointer<T*> { static inline void on(T* value) { delete value; } };
@@ -29,6 +34,21 @@ enum TokenType : short
     NumberLiteral   = 5,
     BinaryOperator  = 6
 };
+
+struct Version
+{
+    unsigned int versionNumber;
+
+    Version(unsigned int number)
+        : versionNumber(number)
+    { }
+
+    Version(Byte major, Byte minor, Byte patch)
+        : versionNumber((major << 24) + (minor << 16) + (patch << 8))
+    { }
+};
+
+const Version VERSION(0, 0, 1);
 
 /***************************************************************************\
 * Empty function signatures used by the structs.
@@ -281,6 +301,11 @@ public:
     {
         return (current = current->next) != nullptr;
     }
+
+    inline void reset()
+    {
+        current = startingMarker;
+    }
 };
 
 /***************************************************************************\
@@ -479,6 +504,7 @@ bool        parseNextStatement          (Tokenizer* tokenizer, Scope* scope, Tok
 bool        parseNumber                 (Tokenizer* tokenizer, String** identifier);
 bool        processBinaryOperatorToken  (Scope* scope, LinkedList<Token*>* tokens, OperatorToken* operatorToken, BinaryOperatorToken** token);
 bool        processTokenListAsStatement (Scope* scope, LinkedList<Token*>* tokens, Token** statement);
+void        compileProgram              (const Program& program);
 void        skipWhitespace              (Tokenizer* tokenizer);
 bool        isTokenAnIdentifier         (Token* token);
 
@@ -505,6 +531,7 @@ int main(int argc, const char** argv)
     {
         if (parse(input, &program))
         {
+            compileProgram(*program);
             delete program;
         }
 
@@ -534,7 +561,7 @@ int main(int argc, const char** argv)
 \***************************************************************************/
 inline bool isAlpha(Char c)
 {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    return iswalpha(c);
 }
 
 /***************************************************************************\
@@ -548,7 +575,7 @@ inline bool isAlpha(Char c)
 \***************************************************************************/
 inline bool isDigit(Char c)
 {
-    return (c >= '0' && c <= '9');
+    return isdigit(c);
 }
 
 /***************************************************************************\
@@ -926,5 +953,161 @@ inline bool isOperatorChar(Char c)
 \***************************************************************************/
 inline bool areEqual(const String& first, const String& second)
 {
-    return first.compare(second) == 0;
+    return first == second;
+}
+
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// Compilation to .kally
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+/***************************************************************************\
+* Represents a single variable on the stack for program execution.
+\***************************************************************************/
+struct StackVariable
+{
+    const String*   name;
+    int             index;
+
+    StackVariable(const String* variableName, int stackIndex)
+        : name(variableName),
+          index(stackIndex)
+    { }
+};
+
+/***************************************************************************\
+* Empty function signatures used by the structs.
+\***************************************************************************/
+void    compileCode     (ostream& output, LinkedList<StackVariable*>& variables, Scope* scope, Token* token);
+bool    findVariable    (LinkedList<StackVariable*>& variables, IdentifierToken* identifier, StackVariable** variable);
+
+/***************************************************************************\
+* Compiles the provided parsed program into KIL
+*
+* Arguments:
+*   program     - This is the program to be compile.
+\***************************************************************************/
+void compileProgram(const Program& program)
+{
+#if _DEBUG
+    ofstream output("output.bin", ios::out | ios::binary);
+#else
+    ostringstream output;
+#endif
+
+    // Print out the version of the kally code file.
+    output.write(reinterpret_cast<const char*>(&VERSION.versionNumber), 4);
+
+    //-----------------------------------------------------------------------
+    // Determine the number of variables.
+    int     variableIndex = 0;
+    LinkedList<StackVariable*> variables;
+    LinkedListIterator<IdentifierToken*>* iterator = program.globalScope->identifiers.getIterator();
+    while (iterator->next())
+    {
+        if (iterator->current->value->tokenType == TokenType::Variable)
+        {
+            variables.append(new StackVariable(iterator->current->value->name, variableIndex++));
+        }
+    }
+    
+    // Number of stack variables
+    output.write(reinterpret_cast<const char*>(&variableIndex), 4);
+
+    // Now, put out basic information about those variables.
+    iterator->reset();
+    while (iterator->next())
+    {
+        
+    }
+
+    delete iterator;
+   
+    //-----------------------------------------------------------------------
+
+    //-----------------------------------------------------------------------
+    // Now for the code
+    compileCode(output, variables, program.globalScope, program.firstToken);
+    //-----------------------------------------------------------------------
+
+    // And finally, return
+    unsigned short o = 0x00ff;
+    output.write(reinterpret_cast<const char*>(&o), 2);
+
+#if _DEBUG
+    output.close();
+#endif
+}
+
+/***************************************************************************\
+* Compiles a token and outputs it to a stream.
+*
+* Arguments:
+*   output      - The stream to output the KIL code to.
+*   variables   - The list of stack varialbes currently available.
+*   scope       - The current scope of the code.
+*   token       - The current token being parsed.
+\***************************************************************************/
+void compileCode(ostream& output, LinkedList<StackVariable*>& variables, Scope* scope, Token* token)
+{
+    if (token->tokenType == TokenType::BinaryOperator)
+    {
+        BinaryOperatorToken* binaryOperatorToken = reinterpret_cast<BinaryOperatorToken*>(token);
+        
+        if (areEqual(*binaryOperatorToken->binaryOperator->value, L"="))
+        {
+            // An assignment
+            compileCode(output, variables, scope, binaryOperatorToken->right);
+
+            IdentifierToken* identifier = reinterpret_cast<IdentifierToken*>(binaryOperatorToken->left);
+            StackVariable* variable;
+            if (findVariable(variables, identifier, &variable))
+            {
+                if (variable->index == 0)
+                {
+                    unsigned short o = 0x0020;
+                    output.write(reinterpret_cast<const char*>(&o), 2);
+                }
+            }
+        }
+    }
+    else if (token->tokenType == TokenType:: NumberLiteral)
+    {
+        NumberLiteralToken* numberToken = reinterpret_cast<NumberLiteralToken*>(token);
+
+        if (areEqual(*numberToken->value, L"5"))
+        {
+            unsigned short o = 0x0015;
+            output.write(reinterpret_cast<const char*>(&o), 2);
+        }
+    }
+}
+
+/***************************************************************************\
+* Finds a variable
+*
+* Arguments:
+*   [IN ] variables     - The list of stack varialbes currently available.
+*   [IN ] identifier    - The identifier token.
+*   [OUT] variable      - The resulting variable that matches the given
+*                         identifier.
+*
+* Returns:
+    True if the variable was found.
+\***************************************************************************/
+bool findVariable(LinkedList<StackVariable*>& variables, IdentifierToken* identifier, StackVariable** variable)
+{
+    LinkedListIterator<StackVariable*>* iterator = variables.getIterator();
+    bool result = false;
+
+    while (iterator->next())
+    {
+        if (areEqual(*iterator->current->value->name, *identifier->name))
+        {
+            *variable = iterator->current->value;
+            result = true;
+        }
+    }
+
+    delete iterator;
+    return result;
 }
