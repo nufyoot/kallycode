@@ -85,11 +85,10 @@ struct TypeToken : Token
     unique_ptr<String>  name;
 
     TypeToken(String&& typeName, unsigned long sizeInMemory = 0)
-        : Token(TokenType::Type)
-    {
-        name.reset(new String(typeName));
-        typeSizeInMemory = sizeInMemory;
-    }
+        : Token(TokenType::Type),
+          name(new String(typeName)),
+          typeSizeInMemory(sizeInMemory)
+    { }
 };
 
 /***************************************************************************\
@@ -97,18 +96,12 @@ struct TypeToken : Token
 \***************************************************************************/
 struct IdentifierToken : Token
 {
-    String* name;
+    unique_ptr<String>  name;
 
-    IdentifierToken(String* name, TokenType type)
-        : Token(type)
-    {
-        this->name = name;
-    }
-
-    virtual ~IdentifierToken()
-    {
-        delete name;
-    }
+    IdentifierToken(String* identifierName, TokenType type)
+        : Token(type),
+          name(identifierName)
+    { }
 };
 
 /***************************************************************************\
@@ -130,17 +123,12 @@ struct VariableDeclarationToken : IdentifierToken
 \***************************************************************************/
 struct OperatorToken : Token
 {
-    String* value;
+    unique_ptr<String>  value;
 
     OperatorToken(String* op)
         : Token(TokenType::Operator),
           value(op)
     { }
-
-    virtual ~OperatorToken()
-    {
-        delete value;
-    }
 };
 
 /***************************************************************************\
@@ -148,17 +136,12 @@ struct OperatorToken : Token
 \***************************************************************************/
 struct NumberLiteralToken : Token
 {
-    String* value;
+    unique_ptr<String>  value;
 
     NumberLiteralToken(String* op)
         : Token(TokenType::NumberLiteral),
           value(op)
     { }
-
-    virtual ~NumberLiteralToken()
-    {
-        delete value;
-    }
 };
 
 /***************************************************************************\
@@ -166,9 +149,9 @@ struct NumberLiteralToken : Token
 \***************************************************************************/
 struct BinaryOperatorToken : Token
 {
-    Token*          left;
-    Token*          right;
-    OperatorToken*  binaryOperator;
+    unique_ptr<Token>           left;
+    unique_ptr<Token>           right;
+    unique_ptr<OperatorToken>   binaryOperator;
 
     BinaryOperatorToken(Token* leftToken, Token* rightToken, OperatorToken* binaryOperatorToken)
         : Token(TokenType::BinaryOperator),
@@ -176,13 +159,6 @@ struct BinaryOperatorToken : Token
           right(rightToken),
           binaryOperator(binaryOperatorToken)
     { }
-
-    ~BinaryOperatorToken()
-    {
-        delete left;
-        delete right;
-        delete binaryOperator;
-    }
 };
 
 /***************************************************************************\
@@ -557,7 +533,7 @@ int main(int argc, const char** argv)
 \***************************************************************************/
 inline bool isAlpha(Char c)
 {
-    return iswalpha(c);
+    return iswalpha(c) != 0;
 }
 
 /***************************************************************************\
@@ -571,7 +547,7 @@ inline bool isAlpha(Char c)
 \***************************************************************************/
 inline bool isDigit(Char c)
 {
-    return isdigit(c);
+    return isdigit(c) != 0;
 }
 
 /***************************************************************************\
@@ -673,9 +649,9 @@ bool processTokenListAsStatement(Scope* scope, LinkedList<Token*>* tokens, Token
         {
             // Very probable that this is a variable declaration.
             TypeToken* type;
-            if (scope->findType(reinterpret_cast<IdentifierToken*>(first)->name, &type))
+            if (scope->findType(static_cast<IdentifierToken*>(first)->name.get(), &type))
             {
-                *statement = new VariableDeclarationToken(type, new String(reinterpret_cast<IdentifierToken*>(second)->name->c_str()));
+                *statement = new VariableDeclarationToken(type, new String(static_cast<IdentifierToken*>(second)->name->c_str()));
                 result = true;
             }
         }
@@ -690,7 +666,7 @@ bool processTokenListAsStatement(Scope* scope, LinkedList<Token*>* tokens, Token
 
             if (tokenType == TokenType::Operator) 
             {
-                OperatorToken* operatorToken = reinterpret_cast<OperatorToken*>(token);
+                OperatorToken* operatorToken = static_cast<OperatorToken*>(token);
             
                 if (areEqual(*operatorToken->value, String(L"=")))
                 {
@@ -822,7 +798,7 @@ bool nextStatementTokenList(Tokenizer* tokenizer, LinkedList<Token*>** tokens)
 
         if (rawToken->tokenType == TokenType::Operator)
         {
-            OperatorToken* operatorToken = reinterpret_cast<OperatorToken*>(rawToken);
+            OperatorToken* operatorToken = static_cast<OperatorToken*>(rawToken);
             if (areEqual(*operatorToken->value, String(L";")))
             {
                 result = true;
@@ -1002,7 +978,7 @@ void compileProgram(const Program& program)
     {
         if (iterator->current->value->tokenType == TokenType::Variable)
         {
-            variables.append(new StackVariable(iterator->current->value->name, variableIndex++));
+            variables.append(new StackVariable(iterator->current->value->name.get(), variableIndex++));
         }
     }
     
@@ -1047,14 +1023,14 @@ void compileCode(ostream& output, LinkedList<StackVariable*>& variables, Scope* 
 {
     if (token->tokenType == TokenType::BinaryOperator)
     {
-        BinaryOperatorToken* binaryOperatorToken = reinterpret_cast<BinaryOperatorToken*>(token);
+        BinaryOperatorToken* binaryOperatorToken = static_cast<BinaryOperatorToken*>(token);
         
         if (areEqual(*binaryOperatorToken->binaryOperator->value, L"="))
         {
             // An assignment
-            compileCode(output, variables, scope, binaryOperatorToken->right);
+            compileCode(output, variables, scope, binaryOperatorToken->right.get());
 
-            IdentifierToken* identifier = reinterpret_cast<IdentifierToken*>(binaryOperatorToken->left);
+            IdentifierToken* identifier = static_cast<IdentifierToken*>(binaryOperatorToken->left.get());
             StackVariable* variable;
             if (findVariable(variables, identifier, &variable))
             {
@@ -1068,7 +1044,7 @@ void compileCode(ostream& output, LinkedList<StackVariable*>& variables, Scope* 
     }
     else if (token->tokenType == TokenType:: NumberLiteral)
     {
-        NumberLiteralToken* numberToken = reinterpret_cast<NumberLiteralToken*>(token);
+        NumberLiteralToken* numberToken = static_cast<NumberLiteralToken*>(token);
 
         if (areEqual(*numberToken->value, L"5"))
         {
