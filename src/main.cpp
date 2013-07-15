@@ -3,6 +3,7 @@
 #include <ctime>
 #include <fstream>
 #include <sstream>
+#include <memory>
 
 // Used for finding memory leaks on windows.
 #ifdef _DEBUG
@@ -80,19 +81,14 @@ struct Token
 \***************************************************************************/
 struct TypeToken : Token
 {
-    unsigned long   typeSizeInMemory;
-    String*         name;
+    unsigned long       typeSizeInMemory;
+    unique_ptr<String>  name;
 
-    TypeToken(String* typeName, unsigned long sizeInMemory = 0)
+    TypeToken(String&& typeName, unsigned long sizeInMemory = 0)
         : Token(TokenType::Type)
     {
-        name = typeName;
+        name.reset(new String(typeName));
         typeSizeInMemory = sizeInMemory;
-    }
-
-    virtual ~TypeToken()
-    {
-        delete name;
     }
 };
 
@@ -418,7 +414,7 @@ struct Scope
     void init()
     {
         // This is just to get a basic scope with the core data.
-        addType(new TypeToken(new String(L"int"), 4UL));
+        addType(new TypeToken(String(L"int"), 4UL));
     }
 };
 
