@@ -16,8 +16,6 @@
 
 using namespace std;
 
-const int STACK_SIZE = 512;
-
 typedef wchar_t         Char;
 typedef wstring         String;
 typedef unsigned char   Byte;
@@ -83,6 +81,12 @@ struct TypeToken : Token
 {
     unsigned long       typeSizeInMemory;
     unique_ptr<String>  name;
+
+    TypeToken(String* typeName, unsigned long sizeInMemory = 0)
+        : Token(TokenType::Type),
+          name(typeName),
+          typeSizeInMemory(sizeInMemory)
+    { }
 
     TypeToken(String&& typeName, unsigned long sizeInMemory = 0)
         : Token(TokenType::Type),
@@ -468,8 +472,8 @@ struct Tokenizer
 /***************************************************************************\
 * Empty function signatures
 \***************************************************************************/
-bool        isOperatorChar              (Char token);
-bool        nextStatementTokenList      (Tokenizer* tokenizer, LinkedList<Token*>** tokens);
+bool        isOperatorChar              (Char c);
+bool        nextStatementTokenList      (Scope* scope, Tokenizer* tokenizer, LinkedList<Token*>** tokens);
 bool        parse                       (const Char* fileName, Program** program);
 bool        parseIdentifier             (Tokenizer* tokenizer, String** identifier);
 bool        parseNextStatement          (Tokenizer* tokenizer, Scope* scope, Token** statement);
@@ -497,9 +501,10 @@ int main(int argc, const char** argv)
 
     const Char* input = 
         L"int i;"
-        L"i = 5;";
+        L"i = 5;"
+        L"print(i);";
 
-    for (long i = 0; i < 1000000; i++) 
+    for (long i = 0; i < 100000; i++) 
     {
         if (parse(input, &program))
         {
@@ -604,7 +609,7 @@ bool parseNextStatement(Tokenizer* tokenizer, Scope* scope, Token** statement)
     
     LinkedList<Token*>* rawTokens;
 
-    if (nextStatementTokenList(tokenizer, &rawTokens))
+    if (nextStatementTokenList(scope, tokenizer, &rawTokens))
     {
         result = processTokenListAsStatement(scope, rawTokens, statement);
 
@@ -668,9 +673,13 @@ bool processTokenListAsStatement(Scope* scope, LinkedList<Token*>* tokens, Token
             {
                 OperatorToken* operatorToken = static_cast<OperatorToken*>(token);
             
-                if (areEqual(*operatorToken->value, String(L"=")))
+                if (areEqual(*operatorToken->value, L"="))
                 {
                     result = processBinaryOperatorToken(scope, tokens, operatorToken, reinterpret_cast<BinaryOperatorToken**>(statement));
+                    break;
+                }
+                else if (areEqual(*operatorToken->value, L"(") || areEqual(*operatorToken->value, L")"))
+                {
                     break;
                 }
             }
@@ -777,13 +786,14 @@ bool nextToken(Tokenizer* tokenizer, Token** result)
 * makes up the statement.
 *
 * Arguments:
+*   [In ] scope     - The current statement scope.
 *   [In ] tokenizer - The tokenizer that is pulling characters from the code.
 *   [Out] tokens    - This is the resulting tokens that make up the statement.
 *
 * Returns:
 *   True if the statment was correctly parsed with no errors.
 \***************************************************************************/
-bool nextStatementTokenList(Tokenizer* tokenizer, LinkedList<Token*>** tokens)
+bool nextStatementTokenList(Scope* scope, Tokenizer* tokenizer, LinkedList<Token*>** tokens)
 {
     LinkedList<Token*>* list = new LinkedList<Token*>();
     bool result = false;
@@ -799,10 +809,23 @@ bool nextStatementTokenList(Tokenizer* tokenizer, LinkedList<Token*>** tokens)
         if (rawToken->tokenType == TokenType::Operator)
         {
             OperatorToken* operatorToken = static_cast<OperatorToken*>(rawToken);
-            if (areEqual(*operatorToken->value, String(L";")))
+            if (areEqual(*operatorToken->value, L";") ||
+                areEqual(*operatorToken->value, L")"))
             {
                 result = true;
                 delete rawToken;
+            }
+            else if (areEqual(*operatorToken->value, L"("))
+            {
+                LinkedList<Token*>* innerStatementList;
+                Token*              innerStatement;
+                
+                result = nextStatementTokenList(scope, tokenizer, &innerStatementList);
+                if (!result) { break; }
+
+                result = processTokenListAsStatement(scope, innerStatementList, &innerStatement);
+                list->append(innerStatement);
+                delete innerStatementList;
             }
         }
 
@@ -910,7 +933,8 @@ inline bool isTokenAnIdentifier(Token* token)
 inline bool isOperatorChar(Char c)
 {
     return c == '='
-        || c == ';';
+        || c == ';'
+        || c == '(' || c == ')';
 }
 
 /***************************************************************************\
